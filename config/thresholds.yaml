@@ -1,0 +1,67 @@
+# Thresholds and configuration for Free Model Observatory v0.1
+
+version: 1
+updated_at: "2026-07-30T00:00:00Z"
+
+# Grading
+grading:
+  judge_model: "openrouter/openai/gpt-4o-mini"
+  judge_pinned_version: "2026-07-30"
+  pairwise: true  # always pairwise, never absolute
+
+# Liveness pinger
+liveness:
+  interval_minutes: 15
+  prompt: "Reply with exactly one word: ok"  # one-token ping
+  max_tokens: 1
+  timeout_seconds: 30
+
+# Quota probe
+quota_probe:
+  daily_time: "06:00 UTC"
+  smoke_items: 5
+  prompt: "Reply with the number 42"  # deterministic, checks quota + basic inference
+  max_tokens: 2
+
+# Weekly capability suite
+weekly:
+  schedule: "Sun 03:00 UTC"
+  items_per_class: 20
+
+# Event triggers
+triggers:
+  new_model: true
+  tos_hash_change: true
+  latency_breach_p95_vs_baseline_ms: 2000  # p95 breach vs 7-day baseline
+  rate_limit_429_spike_threshold: 0.25  # fraction of total attempts
+  shadow_score_regression_threshold: 0.15  # 15% drop vs 7-day rolling average
+
+# Router policy
+router_policy:
+  output_path: "router-policy.json"
+  refresh_after_daily_probe: true
+  chain_terminates_at: "ollama/local-floor"
+  requires_no_train_for_sensitive: true
+
+# Telemetry
+telemetry:
+  influxdb:
+    bucket: "free_model_observatory"
+    measurement_prefix: "fmo_"
+    org: "incidium"
+    retention_policy: "30d"  # raw metrics; aggregated summaries kept longer
+  sqlite:
+    path: "data/observatory.db"
+
+# Shadow scoring
+shadow_scoring:
+  synchronous: true
+  async_fallback: true
+  sensitive_terms_path: "config/sensitive_terms.yaml"
+  mirror_buffer_table: "shadow_buffer"
+  max_async_age_hours: 72
+
+# Cadence enforcement
+cadence:
+  full_suite_skip_limit: 3  # consecutive weeks before kill criteria trigger
+  shadow_scoring_deadline: "2026-08-29"

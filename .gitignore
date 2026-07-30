@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# Data
+data/
+!data/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config with secrets
+.env
+*.env.local
+
+# Reports (generated)
+reports/*
+!reports/.gitkeep
+
+# Router policy (generated)
+router-policy.json
+
+# Coverage
+.coverage
+htmlcov/
+coverage.xml

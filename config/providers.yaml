@@ -1,0 +1,92 @@
+# Provider registry for Free Model Observatory v0.1
+# Each provider has a catalogue endpoint, auth strategy, and known free models.
+# The floor model (Ollama) is always present and not counted against the cap.
+
+version: 1
+updated_at: "2026-07-30T00:00:00Z"
+
+providers:
+  openrouter:
+    display_name: OpenRouter
+    catalogue_url: "https://openrouter.ai/api/v1/models"
+    catalogue_type: openai_compatible
+    auth_type: header
+    auth_header: "Authorization"
+    auth_prefix: "Bearer "
+    filter: ":free"  # suffix filter on model IDs
+    free_model_identifiers: null  # dynamic; filter on :free suffix
+    api_base: "https://openrouter.ai/api/v1"
+    source_confidence: high
+    notes: "Primary hermes provider. Free models are those with :free suffix."
+
+  google:
+    display_name: Google AI Studio / Gemini
+    catalogue_url: "https://generativelanguage.googleapis.com/v1/models"
+    catalogue_type: google
+    auth_type: query_param
+    auth_param: "key"
+    auth_env_var: "GOOGLE_API_KEY"
+    free_model_identifiers:
+      - "gemini-2.0-flash"
+      - "gemini-2.0-flash-lite"
+      - "gemini-1.5-flash"
+      - "gemini-1.5-flash-8b"
+    api_base: "https://generativelanguage.googleapis.com/v1"
+    source_confidence: high
+    notes: "Free tier via API key. Daily quota limits apply."
+
+  groq:
+    display_name: Groq
+    catalogue_url: "https://api.groq.com/openai/v1/models"
+    catalogue_type: openai_compatible
+    auth_type: header
+    auth_header: "Authorization"
+    auth_prefix: "Bearer "
+    auth_env_var: "GROQ_API_KEY"
+    free_model_identifiers:
+      - "llama-3.3-70b-versatile"
+      - "llama-3.1-8b-instant"
+      - "mixtral-8x7b-32768"
+      - "gemma2-9b-it"
+    api_base: "https://api.groq.com/openai/v1"
+    source_confidence: high
+    notes: "LPU architecture. Very low latency — essential for Iris voice turn."
+
+  mistral:
+    display_name: Mistral AI
+    catalogue_url: "https://api.mistral.ai/v1/models"
+    catalogue_type: openai_compatible
+    auth_type: header
+    auth_header: "Authorization"
+    auth_prefix: "Bearer "
+    auth_env_var: "MISTRAL_API_KEY"
+    free_model_identifiers:
+      - "mistral-small-latest"
+      - "open-mistral-nemo"
+      - "open-codestral-mamba"
+    api_base: "https://api.mistral.ai/v1"
+    source_confidence: medium
+    notes: "Free tier models identified by ID. API key needed for free tier."
+
+  cerebras:
+    display_name: Cerebras
+    catalogue_url: "https://api.cerebras.ai/v1/models"
+    catalogue_type: openai_compatible
+    auth_type: header
+    auth_header: "Authorization"
+    auth_prefix: "Bearer "
+    auth_env_var: "CEREBRAS_API_KEY"
+    free_model_identifiers: null  # dynamic; all models currently free
+    api_base: "https://api.cerebras.ai/v1"
+    source_confidence: low
+    notes: "Wafer-scale inference. Free tier poorly documented — treat as low confidence."
+
+  ollama:
+    display_name: Ollama (Local Floor)
+    catalogue_url: null  # local; no remote catalogue
+    catalogue_type: local
+    auth_type: none
+    api_base: "http://localhost:11434"
+    source_confidence: high
+    is_floor: true
+    notes: "Local fallback. Not counted against the five-provider cap."
