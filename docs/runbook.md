@@ -1,6 +1,17 @@
 # Free Model Observatory — Runbook
 # Must be independently executable by Alex Walker and James Benson.
 
+## Important note — git history rewritten
+
+The git history of `main` was force-pushed on 2026-07-30 to purge `config/sensitive_terms.yaml` (which contained client identifiers published to a public repo). This renumbered all SHAs.
+
+If you have an existing clone:
+```bash
+git fetch origin
+git reset --hard origin/main
+```
+If you have local branches, rebase them onto `origin/main` rather than resetting.
+
 ## Prerequisites
 
 - Python 3.12+
