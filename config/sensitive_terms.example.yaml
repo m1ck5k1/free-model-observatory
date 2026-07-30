@@ -1,0 +1,70 @@
+# Sensitive terms example — public version without client roster
+# Copy to ~/fmo-config/sensitive_terms.yaml and add your actual client identifiers
+#
+# Usage:
+#   export FMO_SENSITIVE_TERMS_PATH=~/fmo-config/sensitive_terms.yaml
+#   python -m observatory.policy.generate
+
+version: 1
+updated_at: "2026-07-30T00:00:00Z"
+
+# Hard identifiers — match alone triggers blocking
+# These are unambiguous: serial numbers, asset tags, show codes
+hard_identifiers:
+  # Device and inventory identifiers
+  - "serial:"
+  - "S/N:"
+  - "asset_tag:"
+  - "inventory_id:"
+  - "EXP26-"
+  - "EXP27-"
+
+  # Show and event codes
+  - "show_code:"
+  - "project_code:"
+  - "venue_code:"
+
+# Soft identifiers — only trigger blocking on co-occurrence with hard identifiers
+# Common vendor names appear in normal technical queries; only gate when paired
+# with a venue, show code, or device identifier
+soft_identifiers:
+  # Client organisations (add yours in private config)
+  # - "Hewlett Packard Enterprise"
+  # - "HPE"
+  # - "Dell"
+  # - "Dell Technologies"
+  # - "Broadcom"
+  # - "VMware"
+  # - "Oracle"
+  # - "Cisco"
+  # - "Lenovo"
+  # - "AMD"
+  # - "Intel"
+  # - "NVIDIA"
+  # - "Microsoft"
+  # - "Amazon Web Services"
+  # - "AWS"
+  # - "Google Cloud"
+  # - "GCP"
+  # - "IBM"
+
+  # Venue and event names (add yours in private config)
+  # - "Venetian"
+  # - "Venetian Convention Center"
+  # - "Expo Center"
+  # - "Ai4"
+  # - "VMware Explore"
+  # - "HPE Discover"
+  # - "IBC"
+  # - "ISE"
+  # - "CES"
+  # - "Mobile World Congress"
+  # - "MWC"
+
+  # Internal identifiers (add yours in private config)
+  # - "Incidium"
+  # - "incidium"
+  # - "incidium.net"
+  # - "mbrewer@incidium.net"
+  # - "m1ck5k1"
+  # - "h3rm5k1"

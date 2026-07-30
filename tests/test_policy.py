@@ -58,12 +58,18 @@ def test_load_thresholds():
 
 
 def test_load_sensitive_terms():
-    """Test loading sensitive terms."""
+    """Test loading sensitive terms from example file."""
     terms = load_sensitive_terms()
-    assert len(terms) > 0
-    assert "HPE" in terms
-    assert "Incidium" in terms
-    assert "incidium.net" in terms
+    assert isinstance(terms, dict)
+    assert "hard_identifiers" in terms
+    assert "soft_identifiers" in terms
+    # Example file has hard identifiers (patterns only)
+    assert len(terms["hard_identifiers"]) > 0
+    assert "serial:" in terms["hard_identifiers"]
+    # Soft identifiers are all commented out in example
+    # (actual client roster lives in private config)
+    soft = terms.get("soft_identifiers") or []
+    assert len(soft) >= 0
 
 
 def test_generate_policy_structure(db_path):

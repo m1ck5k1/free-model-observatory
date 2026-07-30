@@ -9,6 +9,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sys
 from datetime import datetime, timezone
 
@@ -52,12 +53,41 @@ def load_config(config_path: str | None = None) -> dict:
         return yaml.safe_load(f)
 
 
+def normalise_tos_html(html: str) -> str:
+    """Normalise a ToS HTML page for stable hashing.
+
+    Strips <script>, <style>, <svg>, <noscript> tags and their content,
+    extracts visible text, collapses whitespace, and lowercases.
+    This produces a hash that changes only when the substantive terms
+    change, not on every deploy (CSRF tokens, build IDs, nonces, timestamps).
+    """
+    # Remove script, style, svg, noscript blocks (tag + content)
+    text = re.sub(r'<(?:script|style|svg|noscript)[^>]*>.*?</(?:script|style|svg|noscript)>',
+                  '', html, flags=re.DOTALL | re.IGNORECASE)
+    # Remove all HTML tags
+    text = re.sub(r'<[^>]+>', ' ', text)
+    # Decode common HTML entities
+    text = text.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
+    text = text.replace('&nbsp;', ' ').replace('&quot;', '"').replace('&#39;', "'")
+    # Collapse whitespace (including newlines, tabs)
+    text = re.sub(r'\s+', ' ', text)
+    # Strip leading/trailing whitespace and lowercase
+    text = text.strip().lower()
+    return text
+
+
 def compute_tos_hash(url: str, timeout: int = 15) -> str | None:
-    """Fetch the ToS/data-retention page and return its SHA-256 hash."""
+    """Fetch the ToS/data-retention page and return its SHA-256 hash.
+
+    The HTML is normalised before hashing — stripping scripts, styles,
+    and nonces — so the hash detects substantive terms changes, not
+    deployment noise.
+    """
     try:
         resp = requests.get(url, timeout=timeout)
         resp.raise_for_status()
-        return hashlib.sha256(resp.text.encode("utf-8")).hexdigest()
+        normalised = normalise_tos_html(resp.text)
+        return hashlib.sha256(normalised.encode("utf-8")).hexdigest()
     except requests.RequestException as e:
         logger.warning("Failed to fetch ToS from %s: %s", url, e)
         return None
@@ -292,6 +322,12 @@ def run_harvest(
         for model in models:
             model_id = model["id"]
             is_new = check_new_model(conn, model_id, provider_key)
+
+            # Set retention_policy from provider config (human judgement, not catalogue)
+            model["retention_policy"] = provider_config.get(
+                "retention_policy",
+                provider_config.get("default_retention_policy", "unknown"),
+            )
 
             # Fetch ToS hash if available
             tos_url = provider_config.get("tos_url")

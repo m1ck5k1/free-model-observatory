@@ -28,6 +28,7 @@ Thumbs.db
 # Config with secrets
 .env
 *.env.local
+config/sensitive_terms.yaml  # actual client roster — use .example.yaml instead
 
 # Reports (generated)
 reports/*

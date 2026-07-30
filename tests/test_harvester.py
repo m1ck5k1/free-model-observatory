@@ -14,6 +14,7 @@ from observatory.harvester.run import (
     compute_eligibility,
     compute_tos_hash,
     load_config,
+    normalise_tos_html,
     parse_google,
     parse_local,
     parse_openai_compatible,
@@ -193,17 +194,20 @@ def test_check_tos_change(db_path):
 
 @patch("observatory.harvester.run.requests.get")
 def test_compute_tos_hash_success(mock_get):
-    """Test ToS hashing with a successful fetch."""
+    """Test ToS hashing with a successful fetch, including HTML normalisation."""
     mock_response = MagicMock()
-    mock_response.text = "This is the terms of service page."
+    mock_response.text = (
+        "<html><body><script>var x=1;</script>"
+        "This is the <b>terms of service</b> page.</body></html>"
+    )
     mock_response.raise_for_status.return_value = None
     mock_get.return_value = mock_response
 
     hash_val = compute_tos_hash("https://example.com/tos")
     assert hash_val is not None
     assert len(hash_val) == 64  # SHA-256 hex
-    # SHA-256 of "This is the terms of service page."
-    expected = hashlib.sha256(b"This is the terms of service page.").hexdigest()
+    # The normalised text should be: "this is the terms of service page."
+    expected = hashlib.sha256(b"this is the terms of service page.").hexdigest()
     assert hash_val == expected
 
 
@@ -235,3 +239,58 @@ def test_fetch_catalogue_local():
     result = fetch_catalogue(config)
     assert len(result) == 1
     assert result[0]["id"] == "local-floor"
+
+
+# ── HTML normalisation tests ──────────────────────────────────────────────
+
+def test_normalise_tos_html_strips_scripts():
+    """Test that <script> tags and their content are stripped."""
+    html = "<html><script>var csrf='abc123';</script><body>Terms</body></html>"
+    result = normalise_tos_html(html)
+    assert "csrf" not in result
+    assert "terms" in result
+
+
+def test_normalise_tos_html_strips_styles():
+    """Test that <style> tags and their content are stripped."""
+    html = "<html><style>.hidden{display:none}</style><body>Privacy Policy</body></html>"
+    result = normalise_tos_html(html)
+    assert "hidden" not in result
+    assert "privacy policy" in result
+
+
+def test_normalise_tos_html_strips_svg():
+    """Test that <svg> tags are stripped."""
+    html = "<body><svg><text>icon</text></svg>Terms of Service</body>"
+    result = normalise_tos_html(html)
+    assert "icon" not in result
+    assert "terms of service" in result
+
+
+def test_normalise_tos_html_collapses_whitespace():
+    """Test that whitespace is collapsed."""
+    html = "<body>Line 1\n\n  Line 2\n\n\nLine 3</body>"
+    result = normalise_tos_html(html)
+    assert "line 1 line 2 line 3" in result
+
+
+def test_normalise_tos_html_lowercases():
+    """Test that text is lowercased."""
+    html = "<body>TERMS OF SERVICE</body>"
+    result = normalise_tos_html(html)
+    assert result == "terms of service"
+
+
+def test_normalise_tos_html_removes_entities():
+    """Test that HTML entities are decoded."""
+    html = "<body>Apple &amp; Orange &lt; Banana</body>"
+    result = normalise_tos_html(html)
+    assert "apple & orange < banana" in result
+
+
+def test_normalise_tos_html_no_script_no_style():
+    """Test that plain text without scripts is preserved."""
+    html = "<html><body>This is the privacy policy. We do not train on your data.</body></html>"
+    result = normalise_tos_html(html)
+    assert "privacy policy" in result
+    assert "train on your data" in result

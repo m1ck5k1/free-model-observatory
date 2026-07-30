@@ -40,13 +40,45 @@ def load_thresholds(config_path: str | None = None) -> dict:
         return yaml.safe_load(f)
 
 
-def load_sensitive_terms(config_path: str | None = None) -> list[str]:
-    """Load sensitive terms from config."""
+def load_sensitive_terms(config_path: str | None = None) -> dict:
+    """Load sensitive terms from config.
+
+    Priority:
+    1. Explicit config_path argument
+    2. FMO_SENSITIVE_TERMS_PATH environment variable
+    3. Default private location: ~/fmo-config/sensitive_terms.yaml
+    4. Fallback to public example (no client roster)
+    """
     if config_path is None:
-        config_path = os.path.join(_project_root(), "config", "sensitive_terms.yaml")
-    with open(config_path) as f:
-        data = yaml.safe_load(f)
-    return data.get("terms", [])
+        config_path = os.environ.get("FMO_SENSITIVE_TERMS_PATH")
+        if config_path is None:
+            # Default to private config location on the operator's machine
+            private_path = os.path.expanduser("~/fmo-config/sensitive_terms.yaml")
+            if os.path.isfile(private_path):
+                config_path = private_path
+            else:
+                # Fallback to public example (no client roster)
+                config_path = os.path.join(
+                    _project_root(), "config", "sensitive_terms.example.yaml"
+                )
+
+    try:
+        with open(config_path) as f:
+            data = yaml.safe_load(f)
+    except FileNotFoundError:
+        logger.warning(
+            "Sensitive terms file not found at %s — no filtering will be applied",
+            config_path,
+        )
+        return {"hard_identifiers": [], "soft_identifiers": []}
+
+    # Ensure lists (handle None from YAML parsing of empty sections)
+    if data.get("hard_identifiers") is None:
+        data["hard_identifiers"] = []
+    if data.get("soft_identifiers") is None:
+        data["soft_identifiers"] = []
+
+    return data
 
 
 def get_eligible_models(conn) -> list[dict]:
@@ -73,7 +105,10 @@ def generate_policy(
     models = get_eligible_models(conn)
 
     # Load config
-    has_sensitive_terms = len(load_sensitive_terms()) > 0
+    sensitive_cfg = load_sensitive_terms()
+    hard_identifiers = sensitive_cfg.get("hard_identifiers", [])
+    soft_identifiers = sensitive_cfg.get("soft_identifiers", [])
+    has_sensitive_terms = len(hard_identifiers) > 0 or len(soft_identifiers) > 0
 
     # Build job-class chains
     # In v0.1, all eligible models go into a flat chain per job class.
