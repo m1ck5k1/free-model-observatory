@@ -46,10 +46,14 @@ router_policy:
 # Telemetry
 telemetry:
   influxdb:
+    host: "http://localhost:8086"  # Override with INFLUXDB_HOST env var
+    token_env: "INFLUXDB_TOKEN"    # InfluxDB v2 API token
+    org_env: "INFLUXDB_ORG"        # Override with env var, fallback to config value
     bucket: "free_model_observatory"
     measurement_prefix: "fmo_"
-    org: "incidium"
+    org: "incidium"                # Fallback if INFLUXDB_ORG is not set
     retention_policy: "30d"  # raw metrics; aggregated summaries kept longer
+    dry_run: false           # Set true to validate format without writing
   sqlite:
     path: "data/observatory.db"
 

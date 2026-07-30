@@ -7,10 +7,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from observatory.harness.liveness import (
+    _format_line_protocol,
+    _influxdb_config,
     get_eligible_models,
     load_config,
     load_thresholds,
     probe_model,
+    write_to_influxdb,
 )
 
 
@@ -134,3 +137,148 @@ def test_load_thresholds():
     thresholds = load_thresholds()
     assert "liveness" in thresholds
     assert thresholds["liveness"]["interval_minutes"] == 15
+
+
+# ── InfluxDB write tests ──────────────────────────────────────────────────
+
+def test_format_line_protocol_success():
+    """Test line protocol formatting for a successful probe."""
+    result = {
+        "model_id": "gpt-4o-mini",
+        "provider": "openrouter",
+        "ttft_ms": 342,
+        "total_latency_ms": 342,
+        "success": True,
+        "status_code": 200,
+        "error": None,
+    }
+    line = _format_line_protocol(result)
+    assert line.startswith("fmo_liveness")
+    assert "provider=openrouter" in line
+    assert "model_id=gpt-4o-mini" in line
+    assert "ttft_ms=342i" in line
+    assert "total_latency_ms=342i" in line
+    assert "success=1i" in line
+    assert "status_code=200i" in line
+    assert "error=" not in line  # no error field when error is None
+    # Verify it ends with a nanosecond timestamp
+    parts = line.split(" ")
+    assert len(parts) >= 3
+    timestamp = parts[-1]
+    assert timestamp.isdigit()
+    assert len(timestamp) == 19  # nanosecond precision
+
+
+def test_format_line_protocol_failure():
+    """Test line protocol formatting for a failed probe."""
+    result = {
+        "model_id": "gpt-4o-mini",
+        "provider": "openrouter",
+        "ttft_ms": None,
+        "total_latency_ms": None,
+        "success": False,
+        "status_code": 429,
+        "error": "rate_limited",
+    }
+    line = _format_line_protocol(result)
+    assert line.startswith("fmo_liveness")
+    assert "provider=openrouter" in line
+    assert "success=0i" in line
+    assert "error=" in line
+    assert "rate_limited" in line
+    # None fields should be omitted
+    assert "ttft_ms=" not in line
+    assert "total_latency_ms=" not in line
+
+
+def test_format_line_protocol_tag_escape():
+    """Test that tag values with special characters are escaped."""
+    result = {
+        "model_id": "model, with=equals",
+        "provider": "test provider",
+        "ttft_ms": 100,
+        "total_latency_ms": 100,
+        "success": True,
+        "status_code": 200,
+        "error": None,
+    }
+    line = _format_line_protocol(result)
+    assert "provider=test\\ provider" in line
+    assert "model_id=model\\,\\ with\\=equals" in line
+
+
+def test_influxdb_config_defaults():
+    """Test InfluxDB config resolution with defaults."""
+    cfg = _influxdb_config()
+    assert "host" in cfg
+    assert "token" in cfg
+    assert "org" in cfg
+    assert "bucket" in cfg
+    assert cfg["bucket"] == "free_model_observatory"
+
+
+def test_influxdb_config_env_overrides(monkeypatch):
+    """Test that env vars override config values."""
+    monkeypatch.setenv("INFLUXDB_HOST", "http://custom:8086")
+    monkeypatch.setenv("INFLUXDB_TOKEN", "supersecret")
+    monkeypatch.setenv("INFLUXDB_ORG", "custom-org")
+    monkeypatch.setenv("INFLUXDB_DRY_RUN", "true")
+
+    cfg = _influxdb_config()
+    assert cfg["host"] == "http://custom:8086"
+    assert cfg["token"] == "supersecret"
+    assert cfg["org"] == "custom-org"
+    assert cfg["dry_run"] is True
+
+
+@patch("observatory.harness.liveness.requests.post")
+def test_write_to_influxdb_dry_run(mock_post):
+    """Test that dry-run mode does not write to InfluxDB."""
+    result = {"model_id": "test", "provider": "test", "ttft_ms": 100,
+              "total_latency_ms": 100, "success": True, "status_code": 200}
+    cfg = {"dry_run": True}
+    success = write_to_influxdb(result, cfg)
+    assert success is True
+    mock_post.assert_not_called()
+
+
+def test_write_to_influxdb_no_token():
+    """Test that missing token is handled gracefully."""
+    result = {"model_id": "test", "provider": "test", "ttft_ms": 100,
+              "total_latency_ms": 100, "success": True, "status_code": 200}
+    cfg = {"dry_run": False, "token": "", "host": "http://localhost:8086",
+           "org": "test", "bucket": "test"}
+    success = write_to_influxdb(result, cfg)
+    assert success is False
+
+
+@patch("observatory.harness.liveness.requests.post")
+def test_write_to_influxdb_success(mock_post):
+    """Test a successful InfluxDB write."""
+    mock_response = MagicMock()
+    mock_response.status_code = 204
+    mock_post.return_value = mock_response
+
+    result = {"model_id": "test", "provider": "test", "ttft_ms": 100,
+              "total_latency_ms": 100, "success": True, "status_code": 200}
+    cfg = {"dry_run": False, "token": "valid-token", "host": "http://localhost:8086",
+           "org": "test", "bucket": "test"}
+    success = write_to_influxdb(result, cfg)
+    assert success is True
+    mock_post.assert_called_once()
+
+
+@patch("observatory.harness.liveness.requests.post")
+def test_write_to_influxdb_http_error(mock_post):
+    """Test that an InfluxDB HTTP error is handled gracefully."""
+    mock_response = MagicMock()
+    mock_response.status_code = 401
+    mock_response.text = "unauthorized"
+    mock_post.return_value = mock_response
+
+    result = {"model_id": "test", "provider": "test", "ttft_ms": 100,
+              "total_latency_ms": 100, "success": True, "status_code": 200}
+    cfg = {"dry_run": False, "token": "bad-token", "host": "http://localhost:8086",
+           "org": "test", "bucket": "test"}
+    success = write_to_influxdb(result, cfg)
+    assert success is False

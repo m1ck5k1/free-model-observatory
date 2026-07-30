@@ -24,6 +24,21 @@ MAX_TOKENS = 1
 TIMEOUT_SECONDS = 30
 
 
+def _influxdb_config(thresholds: dict | None = None) -> dict:
+    """Resolve InfluxDB configuration from thresholds + env overrides."""
+    if thresholds is None:
+        thresholds = load_thresholds()
+    cfg = dict(thresholds.get("telemetry", {}).get("influxdb", {}))
+    # Env overrides
+    cfg["host"] = os.environ.get("INFLUXDB_HOST", cfg.get("host", "http://localhost:8086"))
+    cfg["token"] = os.environ.get(cfg.get("token_env", "INFLUXDB_TOKEN"), "")
+    cfg["org"] = os.environ.get(cfg.get("org_env", "INFLUXDB_ORG"), cfg.get("org", "incidium"))
+    cfg["dry_run"] = os.environ.get(
+        "INFLUXDB_DRY_RUN", str(cfg.get("dry_run", False))
+    ).lower() == "true"
+    return cfg
+
+
 def _project_root() -> str:
     """Find the project root by walking up from the package directory."""
     pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -135,26 +150,107 @@ def probe_model(
     return result
 
 
-def write_to_influxdb(result: dict) -> None:
-    """Write a liveness probe result to InfluxDB.
+def _format_line_protocol(result: dict) -> str:
+    """Format a probe result as InfluxDB line protocol.
 
-    In v0.1, this is a placeholder — writes to stdout for pipeline consumption.
-    Full InfluxDB integration will use the existing Argus InfluxDB MCP connection.
+    Returns a single line protocol string with:
+      measurement=fmo_liveness
+      tags=provider,model_id
+      fields=ttft_ms,total_latency_ms,success,status_code
     """
-    # Placeholder: InfluxDB write via HTTP API
-    # The telemetry layer will be wired to the existing Argus InfluxDB
-    # instance in the next iteration.
-    pass
+    # Escape tag values (commas, spaces, equals)
+    def _escape_tag(v: str) -> str:
+        return v.replace(",", "\\,").replace(" ", "\\ ").replace("=", "\\=")
+    provider = _escape_tag(result.get("provider", "unknown"))
+    model_id = _escape_tag(result.get("model_id", "unknown"))
+
+    # Build fields — only include non-None numeric fields
+    fields = []
+    ttft = result.get("ttft_ms")
+    if ttft is not None:
+        fields.append(f"ttft_ms={ttft}i")
+    lat = result.get("total_latency_ms")
+    if lat is not None:
+        fields.append(f"total_latency_ms={lat}i")
+    sc = result.get("status_code")
+    if sc is not None:
+        fields.append(f"status_code={sc}i")
+    fields.append(f"success={'1' if result.get('success') else '0'}i")
+
+    error = result.get("error")
+    if error:
+        # Escape error string for field value
+        escaped = error.replace("\\", "\\\\").replace('"', '\\"').replace(" ", "\\ ")
+        fields.append(f'error="{escaped}"')
+
+    field_str = ",".join(fields)
+
+    # Timestamp in nanoseconds
+    ts = int(datetime.now(timezone.utc).timestamp() * 1_000_000_000)
+
+    return f"fmo_liveness,provider={provider},model_id={model_id} {field_str} {ts}"
+
+
+def write_to_influxdb(result: dict, influx_cfg: dict | None = None) -> bool:
+    """Write a liveness probe result to InfluxDB via HTTP API.
+
+    Args:
+        result: Probe result dict from probe_model().
+        influx_cfg: InfluxDB config dict (resolved from thresholds + env).
+            If None, resolves from thresholds and env vars.
+
+    Returns:
+        True if the write succeeded (or dry-run is enabled), False otherwise.
+    """
+    if influx_cfg is None:
+        influx_cfg = _influxdb_config()
+
+    line = _format_line_protocol(result)
+
+    if influx_cfg.get("dry_run"):
+        logger.info("[dry-run] InfluxDB point: %s", line)
+        return True
+
+    token = influx_cfg.get("token", "")
+    if not token:
+        logger.warning("InfluxDB token not set — skipping write. Set %s env var.",
+                       influx_cfg.get("token_env", "INFLUXDB_TOKEN"))
+        return False
+
+    host = influx_cfg.get("host", "http://localhost:8086").rstrip("/")
+    org = influx_cfg.get("org", "incidium")
+    bucket = influx_cfg.get("bucket", "free_model_observatory")
+
+    url = f"{host}/api/v2/write?org={org}&bucket={bucket}"
+    headers = {
+        "Authorization": f"Token {token}",
+        "Content-Type": "text/plain; charset=utf-8",
+    }
+
+    try:
+        resp = requests.post(url, headers=headers, data=line, timeout=10)
+        if resp.status_code == 204:
+            logger.debug("InfluxDB write OK: %s/%s", result.get("provider"), result.get("model_id"))
+            return True
+        else:
+            logger.warning("InfluxDB write failed: HTTP %d — %s", resp.status_code, resp.text[:200])
+            return False
+    except requests.RequestException as e:
+        logger.warning("InfluxDB write error: %s", e)
+        return False
 
 
 def run_liveness(
     db_path: str | None = None,
     provider_filter: str | None = None,
+    influx_cfg: dict | None = None,
 ) -> list[dict]:
     """Run the liveness check against all eligible models."""
     conn = init_db(db_path)
     models = get_eligible_models(conn)
     config = load_config()
+    if influx_cfg is None:
+        influx_cfg = _influxdb_config()
 
     if provider_filter:
         models = [m for m in models if m["provider"] == provider_filter]
@@ -186,8 +282,8 @@ def run_liveness(
                 result["provider"], result["model_id"], result["error"],
             )
 
-        # Write to InfluxDB (placeholder)
-        write_to_influxdb(result)
+        # Write to InfluxDB
+        write_to_influxdb(result, influx_cfg)
 
     conn.close()
     return results
@@ -198,6 +294,8 @@ def main():
     parser = argparse.ArgumentParser(description="Free Model Observatory — Liveness Pinger")
     parser.add_argument("--provider", help="Probe only a specific provider")
     parser.add_argument("--db-path", help="Path to SQLite database")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Validate probe format without writing to InfluxDB")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable debug logging")
     args = parser.parse_args()
 
@@ -207,9 +305,14 @@ def main():
         datefmt="%Y-%m-%dT%H:%M:%S%z",
     )
 
+    influx_cfg = _influxdb_config()
+    if args.dry_run:
+        influx_cfg["dry_run"] = True
+
     results = run_liveness(
         db_path=args.db_path,
         provider_filter=args.provider,
+        influx_cfg=influx_cfg,
     )
 
     # Summary
