@@ -125,8 +125,16 @@ def test_parse_local():
 
 def test_compute_eligibility():
     """Test eligibility computation."""
-    # no_train is eligible
+    # no_train WITHOUT verified_by → ineligible (defence against unverified claims)
     eligible, reason = compute_eligibility({"retention_policy": "no_train"})
+    assert eligible is False
+    assert reason == "no_train_without_verification"
+
+    # no_train WITH verified_by → eligible
+    eligible, reason = compute_eligibility({
+        "retention_policy": "no_train",
+        "verified_by": "mbrewer",
+    })
     assert eligible is True
     assert reason is None
 

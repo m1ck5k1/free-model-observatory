@@ -203,15 +203,24 @@ def compute_eligibility(model: dict) -> tuple[bool, str | None]:
     """Compute eligibility for a model based on static rules.
 
     Returns (eligible: bool, ineligible_reason: str | None).
-    In v0.1, this is a placeholder — full eligibility logic requires
-    licence and ToS parsing which is best-effort.
+
+    Rules:
+    - trains_on_input → ineligible
+    - unknown → ineligible (default — fail closed)
+    - no_train → eligible ONLY if verified_by is set (human attestation required)
+    - no_train without verified_by → ineligible (defence against unverified claims)
     """
     retention = model.get("retention_policy", "unknown")
     if retention == "trains_on_input":
         return False, "trains_on_input"
     if retention == "unknown":
         return False, "retention_policy_unknown"
-    return True, None
+    if retention == "no_train":
+        # Require human attestation — no_train without verified_by is rejected
+        if not model.get("verified_by"):
+            return False, "no_train_without_verification"
+        return True, None
+    return False, f"unrecognized_retention_policy:{retention}"
 
 
 def check_tos_change(
@@ -328,6 +337,10 @@ def run_harvest(
                 "retention_policy",
                 provider_config.get("default_retention_policy", "unknown"),
             )
+            # Pass verification fields for eligibility gate
+            model["verified_by"] = provider_config.get("verified_by")
+            model["evidence_url"] = provider_config.get("evidence_url")
+            model["evidence_quote_hash"] = provider_config.get("evidence_quote_hash")
 
             # Fetch ToS hash if available
             tos_url = provider_config.get("tos_url")

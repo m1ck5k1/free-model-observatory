@@ -17,9 +17,12 @@ providers:
     free_model_identifiers: null  # dynamic; filter on :free suffix
     api_base: "https://openrouter.ai/api/v1"
     source_confidence: high
-    retention_policy: no_train
-    retention_verified: "2026-07-30"
-    notes: "Primary hermes provider. Free models are those with :free suffix."
+    retention_policy: unknown
+    retention_verified: null
+    verified_by: null
+    evidence_url: null
+    evidence_quote_hash: null
+    notes: "Retention is per-endpoint and per-account-settings, not provider-level. Requires manual review of account privacy settings and downstream provider terms."
 
   google:
     display_name: Google AI Studio / Gemini
@@ -35,9 +38,12 @@ providers:
       - "gemini-1.5-flash-8b"
     api_base: "https://generativelanguage.googleapis.com/v1"
     source_confidence: high
-    retention_policy: no_train
-    retention_verified: "2026-07-30"
-    notes: "Free tier via API key. Daily quota limits apply."
+    retention_policy: unknown
+    retention_verified: null
+    verified_by: null
+    evidence_url: null
+    evidence_quote_hash: null
+    notes: "Free Gemini tier trains on input per Google's terms. Paid tier may differ. Required before marking no_train: read the actual terms, capture the clause."
 
   groq:
     display_name: Groq
@@ -54,9 +60,12 @@ providers:
       - "gemma2-9b-it"
     api_base: "https://api.groq.com/openai/v1"
     source_confidence: high
-    retention_policy: no_train
-    retention_verified: "2026-07-30"
-    notes: "LPU architecture. Very low latency — essential for Iris voice turn."
+    retention_policy: unknown
+    retention_verified: null
+    verified_by: null
+    evidence_url: null
+    evidence_quote_hash: null
+    notes: "Requires manual ToS review before marking no_train."
 
   mistral:
     display_name: Mistral AI
@@ -74,7 +83,10 @@ providers:
     source_confidence: medium
     retention_policy: unknown
     retention_verified: null
-    notes: "Free tier models identified by ID. Retention policy requires ToS review."
+    verified_by: null
+    evidence_url: null
+    evidence_quote_hash: null
+    notes: "Requires manual ToS review before marking no_train."
 
   cerebras:
     display_name: Cerebras
@@ -89,7 +101,10 @@ providers:
     source_confidence: low
     retention_policy: unknown
     retention_verified: null
-    notes: "Wafer-scale inference. Retention policy requires ToS review."
+    verified_by: null
+    evidence_url: null
+    evidence_quote_hash: null
+    notes: "Requires manual ToS review before marking no_train."
 
   ollama:
     display_name: Ollama (Local Floor)
@@ -101,4 +116,7 @@ providers:
     is_floor: true
     retention_policy: no_train
     retention_verified: "2026-07-30"
-    notes: "Local fallback. Not counted against the five-provider cap."
+    verified_by: "mbrewer"
+    evidence_url: "https://github.com/ollama/ollama"
+    evidence_quote_hash: null
+    notes: "Local inference. No data leaves the host. Trivially no_train."
