@@ -114,9 +114,12 @@ permanent guard. The short version:
   proves behavior, not that the code you pushed still has it* — pushes now re-run the gate.
 
 **The rule:** this tool watches free-tier models for **their** silent failure. It would
-be indefensible to hide **our own**. Every known failure lives here, with its guard, so
-future-you and any collaborator can trust the current state — and see how many ways we've
-already been wrong.
+be indefensible to hide **our own**. Every known failure lives in
+[`docs/failures.md`](./docs/failures.md) — a running log of incidents, root causes, and
+the **permanent mechanical guards** each one built (failing tests, blocking hooks,
+fail-closed paths). New known failures are added there alongside their guard — a note
+without a guard is just documentation, not protection. See how many ways we've already
+been wrong, and that none of them can quietly reopen.
 
 ## The philosophy, in one line
 
