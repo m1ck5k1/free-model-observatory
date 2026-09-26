@@ -58,7 +58,7 @@ def test_load_thresholds():
 
 
 def test_load_sensitive_terms():
-    """Test loading sensitive terms from example file."""
+    """Test loading sensitive terms from example file (non-strict compat)."""
     terms = load_sensitive_terms()
     assert isinstance(terms, dict)
     assert "hard_identifiers" in terms
@@ -66,10 +66,38 @@ def test_load_sensitive_terms():
     # Example file has hard identifiers (patterns only)
     assert len(terms["hard_identifiers"]) > 0
     assert "serial:" in terms["hard_identifiers"]
-    # Soft identifiers are all commented out in example
-    # (actual client roster lives in private config)
-    soft = terms.get("soft_identifiers") or []
-    assert len(soft) >= 0
+
+
+def test_load_sensitive_terms_strict_aborts_on_example():
+    """FAIL-CLOSED (MoA FMO blocker 2): real-traffic shadow-scoring must NOT silently
+    degrade to the patterns-only public example — it must abort."""
+    example = os.path.join(os.path.dirname(__file__), "..", "config", "sensitive_terms.example.yaml")
+    try:
+        load_sensitive_terms(example, strict=True)
+        assert False, "expected RuntimeError for example-as-roster"
+    except RuntimeError as e:
+        assert "example" in str(e) or "no client identifiers" in str(e)
+
+
+def test_load_sensitive_terms_strict_aborts_when_file_missing(tmp_path):
+    """FAIL-CLOSED: a configured-but-missing roster must raise, not run redaction-less."""
+    missing = str(tmp_path / "nope.yaml")
+    try:
+        load_sensitive_terms(missing, strict=True)
+        assert False, "expected RuntimeError for missing roster"
+    except RuntimeError as e:
+        assert "not found" in str(e)
+
+
+def test_load_sensitive_terms_strict_aborts_on_empty_roster(tmp_path):
+    """FAIL-CLOSED: an empty roster (nothing to redact) must not shadow-score."""
+    p = tmp_path / "empty.yaml"
+    p.write_text("hard_identifiers: []\nsoft_identifiers: []\n")
+    try:
+        load_sensitive_terms(str(p), strict=True)
+        assert False, "expected RuntimeError for empty roster"
+    except RuntimeError as e:
+        assert "EMPTY" in str(e)
 
 
 def test_generate_policy_structure(db_path):

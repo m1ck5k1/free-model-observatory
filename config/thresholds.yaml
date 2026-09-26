@@ -5,8 +5,15 @@ updated_at: "2026-07-30T00:00:00Z"
 
 # Grading
 grading:
-  judge_model: "openrouter/openai/gpt-4o-mini"
+  judge_model: "openrouter/openai/gpt-4o-mini"  # incumbent (MoA FMO gate 1d)
   judge_pinned_version: "2026-07-30"
+  # Candidate judge (Jev) validated 2026-09-25 on held-out 14-case set: acc 1.0 vs
+  # incumbent 0.857, Cohen kappa 0.714 — GATE judge_correlation_ok PASSED.
+  # DO NOT flip judge_model to typesafe/jev-1.13 until this review's deploy gate is
+  # fully closed (leak-key rotation + purge irreversibility confirmed) — see
+  # reviews/2026-09-25-free-model-observatory-integration.md blocker 1/3.
+  candidate_judge: "typesafe/jev-1.13"
+  candidate_judge_gate_passed: true
   pairwise: true  # always pairwise, never absolute
 
 # Liveness pinger
