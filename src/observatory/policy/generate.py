@@ -40,7 +40,7 @@ def load_thresholds(config_path: str | None = None) -> dict:
         return yaml.safe_load(f)
 
 
-def load_sensitive_terms(config_path: str | None = None) -> dict:
+def load_sensitive_terms(config_path: str | None = None, *, strict: bool = False) -> dict:
     """Load sensitive terms from config.
 
     Priority:
@@ -48,7 +48,14 @@ def load_sensitive_terms(config_path: str | None = None) -> dict:
     2. FMO_SENSITIVE_TERMS_PATH environment variable
     3. Default private location: ~/fmo-config/sensitive_terms.yaml
     4. Fallback to public example (no client roster)
+
+    `strict=True` (fail-closed, used by real-traffic shadow-scoring / mirror-replay
+    paths): abort if the actual client roster is not available. The public example is
+    patterns-only and carries NO client identifiers, so running real traffic against it
+    redacts nothing — a silent data-boundary breach (MoA FMO blocker 2). When strict,
+    a missing/unresolvable roster raises instead of degrading to the empty example.
     """
+    resolved = None
     if config_path is None:
         config_path = os.environ.get("FMO_SENSITIVE_TERMS_PATH")
         if config_path is None:
@@ -57,15 +64,26 @@ def load_sensitive_terms(config_path: str | None = None) -> dict:
             if os.path.isfile(private_path):
                 config_path = private_path
             else:
-                # Fallback to public example (no client roster)
+                # Fallback to public example (no client roster) — ONLY allowed when
+                # strict=False (non-shadow policy generation may run roster-less).
                 config_path = os.path.join(
                     _project_root(), "config", "sensitive_terms.example.yaml"
                 )
+
+    if config_path:
+        resolved = os.path.abspath(config_path)
 
     try:
         with open(config_path) as f:
             data = yaml.safe_load(f)
     except FileNotFoundError:
+        if strict:
+            raise RuntimeError(
+                f"FAIL-CLOSED: sensitive-terms roster required but not found at "
+                f"{resolved} (FMO_SENSITIVE_TERMS_PATH / ~/fmo-config/sensitive_terms.yaml). "
+                f"Real-traffic shadow-scoring MUST NOT run without the client roster; "
+                f"aborting rather than degrading to the patterns-only example."
+            )
         logger.warning(
             "Sensitive terms file not found at %s — no filtering will be applied",
             config_path,
@@ -77,6 +95,21 @@ def load_sensitive_terms(config_path: str | None = None) -> dict:
         data["hard_identifiers"] = []
     if data.get("soft_identifiers") is None:
         data["soft_identifiers"] = []
+
+    if strict:
+        # Fail-closed: a roster that would redact nothing is as bad as an absent one.
+        if not data["hard_identifiers"] and not data["soft_identifiers"]:
+            raise RuntimeError(
+                f"FAIL-CLOSED: sensitive-terms roster at {resolved} is EMPTY "
+                f"(no hard/soft identifiers). Refusing to shadow-score real traffic "
+                f"against an un-redacting roster."
+            )
+        if resolved and resolved.endswith("sensitive_terms.example.yaml"):
+            raise RuntimeError(
+                f"FAIL-CLOSED: resolved to the patterns-only public example at "
+                f"{resolved}; it carries NO client identifiers. Set "
+                f"FMO_SENSITIVE_TERMS_PATH to the real roster before shadow-scoring."
+            )
 
     return data
 
