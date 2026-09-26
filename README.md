@@ -92,6 +92,32 @@ Full operating detail (including the important — and slightly embarrassing —
 why the git history was rewritten, and what the leak-scan gate now prevents): see
 [`docs/runbook.md`](./docs/runbook.md).
 
+## Failures we've learned from (and build guards against)
+
+Honesty is a feature here, not a footnote. This project's credibility comes from the
+times it was **wrong and caught itself** — each one became a regression test and a
+permanent guard. The short version:
+
+- **We shipped a grader that false-corrected every text-only answer.** A numeric-coalesce
+  shortcut turned `"User Safety: safe"` into a pass. A model that answered nothing scored
+  "correct." Then a second bug — `"INCORRECT"` contains `"CORRECT"` — silently flipped our
+  Jev-as-judge result to a flattering 0.5. Both are now pinned by regression tests that
+  prove the tap cannot reopen.
+- **We near-shipped a leak that bit us before.** The repo's git history was force-pushed
+  to purge a client-identifiers file that had been published publicly (the story, in full,
+  is in `docs/runbook.md`). A `pre-push` leak-scan gate now refuses to push any file
+  carrying a credential shape or the roster — proven in CI to stop both a real secret and
+  the roster itself.
+- **We reported a "closed" safety gate that a stray `git checkout` had silently reverted.**
+  A test passed before the revert, so the green tick was a lie. We caught it in a
+  pre-push self-scan, re-applied it, and re-verified. The lesson baked in: *a passing test
+  proves behavior, not that the code you pushed still has it* — pushes now re-run the gate.
+
+**The rule:** this tool watches free-tier models for **their** silent failure. It would
+be indefensible to hide **our own**. Every known failure lives here, with its guard, so
+future-you and any collaborator can trust the current state — and see how many ways we've
+already been wrong.
+
 ## The philosophy, in one line
 
 **Free should never mean unmonitored.** If a model costs nothing but might quietly betray
