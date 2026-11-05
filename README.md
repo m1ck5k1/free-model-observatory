@@ -65,8 +65,11 @@ fleet-origin probe campaign hit — and fixed, painfully — the real-world trap
 free-tier models (reasoning-in-`reasoning`-field, the empty-completion false-correct,
 the numeric-coalesce lie). Fail-closed redaction and a secret-leak merge gate are wired
 in, because a tool that watches for silent failure has no excuse for silent failure
-itself. The judge for capability scoring has been validated with a measured equivalence
-run; a deliberate switch flips it when we say so.
+itself. The capability judge is **Jev (`typesafe/jev-1.13`)**, flipped 2026-11-05 after a
+measured equivalence run passed (acc 1.0 vs gpt-4o-mini 0.857, κ 0.714); the judge seam
+routes prose grading through the jev-decisions-gateway (non-authoritative, audit-logged),
+numeric items stay deterministic. See `scripts/judge_equivalence.py` + the flip in
+`config/thresholds.yaml`.
 
 See `docs/adr/` for the reasoning behind every real decision, and `BACKLOG.md` for what
 we deliberately chose *not* to build (yet).
