@@ -54,7 +54,7 @@ def test_load_thresholds():
     assert "grading" in thresholds
     assert "liveness" in thresholds
     assert "cadence" in thresholds
-    assert thresholds["grading"]["judge_model"] == "openrouter/openai/gpt-4o-mini"
+    assert thresholds["grading"]["judge_model"] == "typesafe/jev-1.13"
 
 
 def test_load_sensitive_terms():

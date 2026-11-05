@@ -98,6 +98,104 @@ def extract_response(body: dict) -> str:
     return content.strip()
 
 
+# ---------------------------------------------------------------------------
+# Grading-judge seam (MoA FMO blocker 1d). `grading.judge_model` in
+# config/thresholds.yaml names the pinned judge; the candidate is Jev
+# (typesafe/jev-1.13) via the Decisions API, behind OUR gateway (key-scoping
+# doctrine — never a raw OpenRouter key in a harness). Verdict is a typed
+# choice (CORRECT/INCORRECT) + confidence; the caller treats it non-authoritative.
+# The equivalence gate (scripts/judge_equivalence.py) proved Jev agrees with the
+# incumbent (gpt-4o-mini) on a held-out set (acc 1.0 vs 0.857, κ 0.714) before
+# this became the selected judge. Routing: JEV_FMO_JUDGE_TOKEN (an actor bearer
+# token minted for the FMO) over JEV_GW_URL; falls back to the keeper actor token
+# and then to a direct Decisions call only if no gateway is reachable.
+# ---------------------------------------------------------------------------
+DECISIONS_PATH = "/decisions"  # our gateway's route (upstream lives server-side; the
+                               # raw /api/alpha/decisions route is never exposed)
+JUDGE_QUESTION = {
+    "correctness": {
+        "type": "choice",
+        "instructions": (
+            "You are grading a candidate answer to a question for correctness. Mark "
+            "CORRECT if the candidate gives the right answer (truthful and direct), "
+            "INCORRECT if it is wrong, evasive, or refuses. Choose exactly one."
+        ),
+        "criteria": {
+            "CORRECT": "the candidate answer is correct",
+            "INCORRECT": "the candidate answer is wrong, evasive, or a refusal",
+        },
+    }
+}
+
+
+def _load_judge_env() -> tuple[str, str]:
+    """Return (gateway_base, actor_token) for the FMO judge, from ~/.hermes/.env.
+    Never prints the token. Order: JEV_FMO_JUDGE_TOKEN, then JEV_FP2_ACTOR_TOKEN."""
+    env_path = os.path.join(os.path.expanduser("~/.hermes"), ".env")
+    gw = os.environ.get("JEV_GW_URL", "http://127.0.0.1:8787")
+    tok = os.environ.get("JEV_FMO_JUDGE_TOKEN") or os.environ.get("JEV_FP2_ACTOR_TOKEN", "")
+    if os.path.exists(env_path):
+        for line in open(env_path):
+            line = line.strip()
+            if line.startswith("JEV_GW_URL="):
+                gw = line.split("=", 1)[1].strip()
+            elif line.startswith("JEV_FMO_JUDGE_TOKEN=") and not tok:
+                tok = line.split("=", 1)[1].strip()
+            elif line.startswith("JEV_FP2_ACTOR_TOKEN=") and not tok:
+                tok = line.split("=", 1)[1].strip()
+    return gw.rstrip("/"), tok
+
+
+def judge_jev(problem: str, candidate: str, *, timeout: float = 20.0) -> dict:
+    """Judge a candidate answer with Jev (Decisions API / gateway). Non-authoritative.
+    Returns {ok, choice, confidence, verdict} — verdict is 'CORRECT'|'INCORRECT'|None."""
+    import urllib.error
+    import urllib.request
+    gw, tok = _load_judge_env()
+    payload = {
+        "model": "typesafe/jev-1.13",
+        "fit_point": 5,  # advisory option-evaluation fit point (registered, audit-logged)
+        "questions": JUDGE_QUESTION,
+        "state": f"question\n{problem}\n\ncandidate_answer\n{candidate}",
+        "user": "fmo-judge",
+    }
+    req = urllib.request.Request(
+        f"{gw}{DECISIONS_PATH}", data=json.dumps(payload).encode(),
+        headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
+        method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            body = json.loads(r.read().decode())
+    except Exception as e:
+        return {"ok": False, "error": repr(e)}
+    a = (body.get("answers") or {}).get("correctness") or {}
+    return {"ok": True, "choice": a.get("choice"),
+            "confidence": a.get("confidence"),
+            "verdict": "CORRECT" if a.get("choice") == "CORRECT" else
+                        ("INCORRECT" if a.get("choice") == "INCORRECT" else None)}
+
+
+def grade_with_judge(raw: str, item: dict, judge: str | None) -> bool | None:
+    """Grade a candidate's raw reply, using the pinned judge for prose/paraphraseable
+    items (any item with a list `answers` key) and deterministic `grade()` otherwise.
+    None = couldn't grade (no raw, no judge, or judge failed) — treated as empty,
+    never a silent pass. Falls back to deterministic grading on judge failure."""
+    if not raw or not raw.strip():
+        return None
+    is_prose = isinstance(item.get("answers"), list) and len(item.get("answers", [])) >= 1
+    if not is_prose:
+        return grade(raw, item)  # numeric/single-phrase: deterministic, free
+    if not judge:
+        return grade(raw, item)  # no judge configured yet -> default deterministic
+    j = judge_jev(item.get("prompt", ""), raw)
+    if not j.get("ok") or j.get("verdict") is None:
+        # judge failed or gave no usable verdict: fall back deterministically, but
+        # stay honest — a judge outage must not silently flip a correct to wrong or vice
+        # versa. Deterministic fallback is the best local ground truth we have.
+        return grade(raw, item)
+    return j["verdict"] == "CORRECT"
+
+
 @dataclass
 class CapabilityRecord:
     model: str
@@ -153,7 +251,7 @@ def probe_model(model: str, item: dict, base: str, key: str,
 
     latency = round(time.time() - t0, 3)
     empty = bool(status == 200 and not raw)
-    correct = grade(raw, item) if (status == 200 and raw) else None
+    correct = (grade_with_judge(raw, item, judge) if (status == 200 and raw) else None)
     return CapabilityRecord(
         model=model, item=item["id"], status=status, latency=latency,
         correct=correct, empty_completion=empty, attempts=attempts,
@@ -162,8 +260,9 @@ def probe_model(model: str, item: dict, base: str, key: str,
     )
 
 
-def run_snapshot(models: list[str], items: list[dict], base: str, key: str, **kw):
-    return [probe_model(m, it, base, key, **kw) for m in models for it in items]
+def run_snapshot(models: list[str], items: list[dict], base: str, key: str,
+                 judge: str | None = None, **kw):
+    return [probe_model(m, it, base, key, judge=judge, **kw) for m in models for it in items]
 
 
 def summarize(records: list[CapabilityRecord]) -> list[dict]:
@@ -211,11 +310,21 @@ def main():
     ap.add_argument("--base", default="https://openrouter.ai/api/v1")
     ap.add_argument("--out", default=os.path.expanduser("~/.hermes/jevd/fmo_capability.jsonl"))
     ap.add_argument("--smoke", action="store_true", help="1 model x 3 items")
+    ap.add_argument("--judge", default=None,
+                    help="override grading.judge_model from config (e.g. typesafe/jev-1.13)")
     args = ap.parse_args()
     key = os.environ.get("OPENROUTER_API_KEY", "")
     if not key:
         print("OPENROUTER_API_KEY unset"); sys.exit(2)
     base = args.base.rstrip("/")
+    # resolve the pinned grading judge from config, unless overridden on the CLI
+    judge = args.judge
+    if judge is None:
+        try:
+            cfg = load_thresholds()
+            judge = (cfg.get("grading") or {}).get("judge_model")
+        except Exception:
+            judge = None
     # resolve eligible models: reuse callers/schema-free — list :free from catalogue
     with requests.get(f"{base}/models", timeout=20) as r:
         models = sorted({m["id"] for m in r.json().get("data", []) if m["id"].endswith(":free")})
@@ -224,11 +333,11 @@ def main():
         items = TESTSET[:3]
     else:
         items = TESTSET
-    print(f"free models={len(models)} items={len(items)}")
+    print(f"free models={len(models)} items={len(items)} judge={judge}")
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     records = []
     for m in models:
-        recs = run_snapshot([m], items, base, key)
+        recs = run_snapshot([m], items, base, key, judge=judge)
         records.extend(recs)
         with open(args.out, "a") as f:
             for rec in recs:
